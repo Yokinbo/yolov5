@@ -1,0 +1,9 @@
+path: /mnt/e/YOLO/yolov5/data/enhancedata
+train: images/train
+val: images/val
+test: images/test
+nc: 2
+names:
+  0: background
+  1: JML
+
