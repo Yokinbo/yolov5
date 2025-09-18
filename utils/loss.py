@@ -252,3 +252,7 @@ class ComputeLoss:
             tcls.append(c)  # class
 
         return tcls, tbox, indices, anch
+
+
+#ComputeLoss 把 定位（CIoU）+ 目标存在性（BCE，IoU 作为软标签）+ 分类（BCE，带标签平滑/可选Focal） 三部分按超参加权求和，
+# 并结合 anchor 匹配 + 邻格扩展 + 分层平衡 完成监督，是 YOLOv5 训练里最核心的损失实现。

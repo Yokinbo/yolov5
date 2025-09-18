@@ -219,7 +219,7 @@ class DetectionModel(BaseModel):
     """YOLOv5 detection model class for object detection tasks, supporting custom configurations and anchors."""
 
     def __init__(self, cfg="yolov5s.yaml", ch=3, nc=None, anchors=None):
-        """Initializes YOLOv5 model with configuration file, input channels, number of classes, and custom anchors."""
+        """Initializes YOLOv5 model with configuration file, input channels, number of classes, and custom anchors.加载yaml配置文件"""
         super().__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -230,7 +230,7 @@ class DetectionModel(BaseModel):
             with open(cfg, encoding="ascii", errors="ignore") as f:
                 self.yaml = yaml.safe_load(f)  # model dict
 
-        # Define model
+        # Define model  用加载好的配置文件，搭建网络的每一层
         ch = self.yaml["ch"] = self.yaml.get("ch", ch)  # input channels
         if nc and nc != self.yaml["nc"]:
             LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
@@ -242,7 +242,7 @@ class DetectionModel(BaseModel):
         self.names = [str(i) for i in range(self.yaml["nc"])]  # default names
         self.inplace = self.yaml.get("inplace", True)
 
-        # Build strides, anchors
+        # Build strides, anchors                求网络的步长，对anchors进行处理
         m = self.model[-1]  # Detect()
         if isinstance(m, (Detect, Segment)):
 
@@ -258,7 +258,7 @@ class DetectionModel(BaseModel):
             self.stride = m.stride
             self._initialize_biases()  # only run once
 
-        # Init weights, biases
+        # Init weights, biases         对网络参数的初始化，以及打印工作
         initialize_weights(self)
         self.info()
         LOGGER.info("")
@@ -374,9 +374,9 @@ class ClassificationModel(BaseModel):
         self.model = None
 
 
-def parse_model(d, ch):
+def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, input_channels(3):ch表示[3]
     """Parses a YOLOv5 model from a dict `d`, configuring layers based on input channels `ch` and model architecture."""
-    LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
+    LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")          #在终端中打印信息
     anchors, nc, gd, gw, act, ch_mul = (
         d["anchors"],
         d["nc"],
@@ -390,17 +390,17 @@ def parse_model(d, ch):
         LOGGER.info(f"{colorstr('activation:')} {act}")  # print
     if not ch_mul:
         ch_mul = 8
-    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-    no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
+    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors  na：anchors的数量，一般为3。nc为类别数。
+    no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)  no表示模型的最终的输出通道数（如coco128数据集的80个类，则输出通道数为255）  5=w+h+x+y+c
 
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
-        m = eval(m) if isinstance(m, str) else m  # eval strings
+    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out      c1为输入通道数，c2为输出通道数
+    for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # 例from：-1, number：1, module：‘Conv’, args：[64, 6, 2, 2]
+        m = eval(m) if isinstance(m, str) else m  # eval strings       通过eval函数解析，将字符串转为对应的类
         for j, a in enumerate(args):
             with contextlib.suppress(NameError):
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
 
-        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain    求n的实际值
         if m in {
             Conv,
             GhostConv,
@@ -421,7 +421,7 @@ def parse_model(d, ch):
             DWConvTranspose2d,
             C3x,
         }:
-            c1, c2 = ch[f], args[0]
+            c1, c2 = ch[f], args[0]                                  #第一层，ch是一个只有3一个值的列表，[-1]是取列表中的最后一个元素，因为列表中只有3，所以是3
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, ch_mul)
 
@@ -447,7 +447,7 @@ def parse_model(d, ch):
         else:
             c2 = ch[f]
 
-        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module  若n不为1，则堆叠模块
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
