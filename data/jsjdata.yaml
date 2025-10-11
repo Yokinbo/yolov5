@@ -12,14 +12,12 @@
 #train: dataset/images/train # train images (relative to 'path') 118287 images
 #val: dataset/images/val # val images (relative to 'path') 5000 images
 #test: test-dev2017.txt # 20288 of 40670 images, submit to https://competitions.codalab.org/competitions/20794
-path: /mnt/e/YOLO/yolov5/data/jsjdataset # dataset root dir
+path: /mnt/e/YOLO/yolov5/data/jsjdata2 # dataset root dir
 train: images/train # train images (relative to 'path') 118287 images
 val: images/val
 # Classes
-nc: 4
+nc: 1
 names:
   0: ThermalPP
-  1: WindF
-  2: SolarPP
-  3: CementP
+  
 
