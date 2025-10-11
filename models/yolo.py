@@ -48,6 +48,8 @@ from models.common import (
     GhostBottleneck,
     GhostConv,
     Proto,
+    BiFPN_Concat2,
+    BiFPN_Concat3,
 )
 from models.experimental import MixConv2d
 from utils.autoanchor import check_anchor_order
@@ -433,6 +435,14 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        
+        # 添加bifpn_concat结构
+        elif m is BiFPN_Concat2:
+            c2 = sum(ch[x] for x in f)
+        # 添加bifpn_concat结构
+        elif m is BiFPN_Concat3:
+            c2 = sum(ch[x] for x in f)
+
         # TODO: channel, gw, gd
         elif m in {Detect, Segment}:
             args.append([ch[x] for x in f])
