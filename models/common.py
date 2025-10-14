@@ -1122,9 +1122,10 @@ class Classify(nn.Module):
             x = torch.cat(x, 1)
         return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
     
-
+"""
 # 结合BiFPN 设置可学习参数 学习不同分支的权重
 # 两个分支concat操作
+
 class BiFPN_Concat2(nn.Module):
     def __init__(self, dimension=1):
         super(BiFPN_Concat2, self).__init__()
@@ -1157,3 +1158,191 @@ class BiFPN_Concat3(nn.Module):
         # Fast normalized fusion
         x = [weight[0] * x[0], weight[1] * x[1], weight[2] * x[2]]
         return torch.cat(x, self.d)
+"""
+
+import torch.nn.functional as F
+
+class BiFPN_Concat2(nn.Module):
+    def __init__(self, dimension=1):
+        super().__init__()
+        self.d = dimension
+        self.w = nn.Parameter(torch.ones(2, dtype=torch.float32), requires_grad=True)
+        self.epsilon = 1e-4
+
+    def forward(self, x):
+        # 统一到最大的 H, W（把小的上采样）
+        th = max(t.shape[-2] for t in x)
+        tw = max(t.shape[-1] for t in x)
+        x = [t if t.shape[-2:] == (th, tw) else F.interpolate(t, size=(th, tw), mode='nearest') for t in x]
+
+        weight = self.w / (torch.sum(self.w, dim=0) + self.epsilon)
+        # 你想“加权融合后再 cat” or “cat 后交给后续卷积”都行，保持你原来的逻辑即可
+        return torch.cat([weight[0]*x[0], weight[1]*x[1]], dim=self.d)
+
+
+class BiFPN_Concat3(nn.Module):
+    def __init__(self, dimension=1):
+        super().__init__()
+        self.d = dimension
+        self.w = nn.Parameter(torch.ones(3, dtype=torch.float32), requires_grad=True)
+        self.epsilon = 1e-4
+
+    def forward(self, x):
+        th = max(t.shape[-2] for t in x)
+        tw = max(t.shape[-1] for t in x)
+        x = [t if t.shape[-2:] == (th, tw) else F.interpolate(t, size=(th, tw), mode='nearest') for t in x]
+
+        weight = self.w / (torch.sum(self.w, dim=0) + self.epsilon)
+        return torch.cat([weight[0]*x[0], weight[1]*x[1], weight[2]*x[2]], dim=self.d)
+
+import math
+import torch
+import torch.nn as nn
+
+def get_dwconv(dim, kernel=7, bias=True):
+    # 你的原实现即可，这里给出最常见写法
+    return nn.Conv2d(dim, dim, kernel_size=kernel, padding=(kernel - 1) // 2,
+                     bias=bias, groups=dim)
+
+class gnConv(nn.Module):
+    def __init__(self, c1, c2, order=5, stride=1, gflayer=None, h=14, w=8, s=1.0):
+        super().__init__()
+        self.c1, self.c2 = int(c1), int(c2)
+
+        # 1) 安全的 order（避免出现 0 通道）
+        max_order = int(math.log2(max(2, self.c2))) + 1
+        order = max(1, min(int(order), max_order))
+
+        # 2) 生成各段通道（小->大），并做“对齐修正”，保证 split 恰好等于 2*c2
+        dims = [max(1, self.c2 // (2 ** i)) for i in range(order)][::-1]
+        dims = [d for d in dims if d > 0]
+        S = sum(dims)
+        need = 2 * self.c2 - (dims[0] + S)   # 目标和 - 实际和
+        dims[0] = max(1, dims[0] + need)     # 把误差吸收到第一段
+        self.dims = dims
+        self.order = len(dims)
+        assert self.dims[0] + sum(self.dims) == 2 * self.c2, \
+            f"gnConv split mismatch: {self.dims[0]} + {sum(self.dims)} != {2*self.c2}"
+
+        # 3) 各层
+        self.proj_in  = nn.Conv2d(c1, 2 * c2, kernel_size=1, stride=int(stride), bias=True)
+        if callable(gflayer):
+            self.dwconv = gflayer(sum(self.dims), h=h, w=w)
+        else:
+            self.dwconv = get_dwconv(sum(self.dims), 7, True)
+        self.proj_out = nn.Conv2d(self.c2, self.c2, 1)
+        self.pws = nn.ModuleList(
+            [nn.Conv2d(self.dims[i], self.dims[i + 1], 1) for i in range(self.order - 1)]
+        )
+        self.scale = s
+
+    def forward(self, x, mask=None, dummy=False):
+        fused_x = self.proj_in(x)  # [B, 2*c2, H, W]
+        pwa, abc = torch.split(fused_x, (self.dims[0], sum(self.dims)), dim=1)
+
+        dw_abc = self.dwconv(abc) * self.scale
+        dw_list = torch.split(dw_abc, self.dims, dim=1)
+
+        y = pwa * dw_list[0]
+        for i in range(self.order - 1):
+            y = self.pws[i](y) * dw_list[i + 1]
+        return self.proj_out(y)
+
+"""
+class gnConv(nn.Module):
+    def __init__(self, dim, order=5, gflayer=None, h=14, w=8, s=1.0):
+        super().__init__()
+        self.order = order
+        self.dims = [dim // 2 ** i for i in range(order)]
+        self.dims.reverse()
+        self.proj_in = nn.Conv2d(dim, 2*dim, 1)
+ 
+        if gflayer is None:
+            self.dwconv = get_dwconv(sum(self.dims), 7, True)
+        else:
+            self.dwconv = gflayer(sum(self.dims), h=h, w=w)
+        
+        self.proj_out = nn.Conv2d(dim, dim, 1)
+ 
+        self.pws = nn.ModuleList(
+            [nn.Conv2d(self.dims[i], self.dims[i+1], 1) for i in range(order-1)]
+        )
+        self.scale = s
+ 
+    def forward(self, x, mask=None, dummy=False):
+        # B, C, H, W = x.shape gnconv [512]by iscyy/air
+        fused_x = self.proj_in(x)
+        pwa, abc = torch.split(fused_x, (self.dims[0], sum(self.dims)), dim=1)
+        dw_abc = self.dwconv(abc) * self.scale
+        dw_list = torch.split(dw_abc, self.dims, dim=1)
+        x = pwa * dw_list[0]
+        for i in range(self.order -1):
+            x = self.pws[i](x) * dw_list[i+1]
+        x = self.proj_out(x)
+ 
+        return x
+ 
+def get_dwconv(dim, kernel, bias):
+    return nn.Conv2d(dim, dim, kernel_size=kernel, padding=(kernel-1)//2 ,bias=bias, groups=dim)
+"""
+
+
+"""
+def get_dwconv(dim, kernel, bias):
+    return nn.Conv2d(dim, dim, kernel_size=kernel, padding=(kernel-1)//2 ,bias=bias, groups=dim)
+
+
+class gnConv(nn.Module):
+    def __init__(self, c1, c2, order=5, gflayer=None, h=14, w=8, s=1.0):
+        super().__init__()
+        
+        assert c1 == c2, f"gnConv要求输入输出通道相同: c1={c1}, c2={c2}"
+        dim = c1
+
+        self.order = order# 空间交互的阶数，即n
+        self.dims = [dim // 2 ** i for i in range(order)]# 将2C在不同阶的空间上进行切分，对应公式3.2
+        self.dims.reverse()# 反序，使低层通道少，高层通道多
+        self.proj_in = nn.Conv2d(dim, 2* dim, 1)# 输入x的线性映射层，对应$\phi(in)$
+
+        if gflayer is None:# 是否使用Global Filter
+            self.dwconv = get_dwconv(sum(self.dims), 7, True)
+        else:# 在全特征上进行卷积，多在后期使用
+            self.dwconv = gflayer(sum(self.dims), h=h, w=w)
+
+        self.proj_out = nn.Conv2d(dim, dim, 1)# 输出y的线性映射层，对应$\phi(out)$
+
+        self.pws = nn.ModuleList(# 高阶空间交互过程中使用的卷积模块，对应公式3.4
+            [nn.Conv2d(self.dims[i], self.dims[i + 1], 1) for i in range(order - 1)]
+        )
+
+        self.scale = s# 缩放系数，对应公式3.3中的$\alpha$
+        #print('[gnconv]', order, 'order with dims=', self.dims, 'scale=%.4f' % self.scale)
+
+    def forward(self, x, mask=None, dummy=False):
+        #print(self.dims)
+
+        fused_x = self.proj_in(x)# channel double
+        #print("fused_x:",fused_x.shape)
+        pwa, abc = torch.split(fused_x, (self.dims[0], sum(self.dims)), dim=1)# split channel to c/2**order and c(1-2**oder)
+        #print("pwa:{}  abc:{}".format(pwa.shape,abc.shape))
+
+        dw_abc = self.dwconv(abc) * self.scale
+        #print('dw_abc:{}'.format(dw_abc.shape))
+
+        dw_list = torch.split(dw_abc, self.dims, dim=1)
+
+        # 两个相同尺寸的张量相乘，对应元素的相乘就是这个哈达玛积(mul)
+        x = pwa * dw_list[0]
+        print("x:{}".format(x.shape))
+
+        for i in range(self.order - 1):
+            x = self.pws[i](x) * dw_list[i + 1]
+            # print('conv[{}]:{} * dw_list[{}]:{} = x:{}'.format(i,self.pws[i],
+            #                                                    i+1,dw_list[i+1].shape,
+            #                                                    x.shape))
+
+        x = self.proj_out(x)
+
+        return x
+"""
+
