@@ -1121,3 +1121,56 @@ class Classify(nn.Module):
         if isinstance(x, list):
             x = torch.cat(x, 1)
         return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
+
+import math
+import torch
+import torch.nn as nn
+
+def get_dwconv(dim, kernel=7, bias=True):
+    # 你的原实现即可，这里给出最常见写法
+    return nn.Conv2d(dim, dim, kernel_size=kernel, padding=(kernel - 1) // 2,
+                     bias=bias, groups=dim)
+
+class gnConv(nn.Module):
+    def __init__(self, c1, c2, order=5, stride=1, gflayer=None, h=14, w=8, s=1.0):
+        super().__init__()
+        self.c1, self.c2 = int(c1), int(c2)
+
+        # 1) 安全的 order（避免出现 0 通道）
+        max_order = int(math.log2(max(2, self.c2))) + 1
+        order = max(1, min(int(order), max_order))
+
+        # 2) 生成各段通道（小->大），并做“对齐修正”，保证 split 恰好等于 2*c2
+        dims = [max(1, self.c2 // (2 ** i)) for i in range(order)][::-1]
+        dims = [d for d in dims if d > 0]
+        S = sum(dims)
+        need = 2 * self.c2 - (dims[0] + S)   # 目标和 - 实际和
+        dims[0] = max(1, dims[0] + need)     # 把误差吸收到第一段
+        self.dims = dims
+        self.order = len(dims)
+        assert self.dims[0] + sum(self.dims) == 2 * self.c2, \
+            f"gnConv split mismatch: {self.dims[0]} + {sum(self.dims)} != {2*self.c2}"
+
+        # 3) 各层
+        self.proj_in  = nn.Conv2d(c1, 2 * c2, kernel_size=1, stride=int(stride), bias=True)
+        if callable(gflayer):
+            self.dwconv = gflayer(sum(self.dims), h=h, w=w)
+        else:
+            self.dwconv = get_dwconv(sum(self.dims), 7, True)
+        self.proj_out = nn.Conv2d(self.c2, self.c2, 1)
+        self.pws = nn.ModuleList(
+            [nn.Conv2d(self.dims[i], self.dims[i + 1], 1) for i in range(self.order - 1)]
+        )
+        self.scale = s
+
+    def forward(self, x, mask=None, dummy=False):
+        fused_x = self.proj_in(x)  # [B, 2*c2, H, W]
+        pwa, abc = torch.split(fused_x, (self.dims[0], sum(self.dims)), dim=1)
+
+        dw_abc = self.dwconv(abc) * self.scale
+        dw_list = torch.split(dw_abc, self.dims, dim=1)
+
+        y = pwa * dw_list[0]
+        for i in range(self.order - 1):
+            y = self.pws[i](y) * dw_list[i + 1]
+        return self.proj_out(y)
