@@ -48,6 +48,7 @@ from models.common import (
     GhostBottleneck,
     GhostConv,
     Proto,
+    gnConv,
 )
 from models.experimental import MixConv2d
 from utils.autoanchor import check_anchor_order
@@ -420,12 +421,18 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
             nn.ConvTranspose2d,
             DWConvTranspose2d,
             C3x,
+            gnConv,
         }:
             c1, c2 = ch[f], args[0]                                  #第一层，ch是一个只有3一个值的列表，[-1]是取列表中的最后一个元素，因为列表中只有3，所以是3
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, ch_mul)
-
-            args = [c1, c2, *args[1:]]
+            if m is gnConv and len(args) >= 2:
+                order = int(args[1])          # 不缩放、不取整到8倍数，保持 YAML 里的 5/6
+                stride = int(args[2]) if len(args) >= 3 else 1
+                args = [c1, c2, order, stride, *args[3:]]
+            else:
+                args = [c1, c2, *args[1:]]    # 其它模块走原逻辑
+            #args = [c1, c2, *args[1:]]
             if m in {BottleneckCSP, C3, C3TR, C3Ghost, C3x}:
                 args.insert(2, n)  # number of repeats
                 n = 1
