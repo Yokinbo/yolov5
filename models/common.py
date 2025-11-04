@@ -1121,3 +1121,60 @@ class Classify(nn.Module):
         if isinstance(x, list):
             x = torch.cat(x, 1)
         return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
+
+
+#以下为个人添加的类
+import torch
+import torch.nn as nn
+
+from torch.profiler import profile, ProfilerActivity
+from thop import profile
+
+
+class CSFblock(nn.Module):
+    def __init__(self, high_channels, low_channels,outChannels):
+        super().__init__()
+
+        self.UpChannels = nn.Sequential(
+            nn.Conv2d(low_channels, outChannels, kernel_size=1, padding=0, dilation=1, bias=True),
+            nn.BatchNorm2d(outChannels),)
+        self.DownChannels = nn.Sequential(
+            nn.Conv2d(high_channels, outChannels, kernel_size=1, padding=0, dilation=1, bias=True),
+            nn.BatchNorm2d(outChannels),)
+
+        self.AdaptiveAvgPool2d_1 = nn.AdaptiveAvgPool2d(1)
+        self.AdaptiveAvgPool2d_2 = nn.AdaptiveAvgPool2d(1)
+
+        self.softmax = nn.Softmax(dim=2)
+
+    def forward(self, inputs): 
+
+        if len(inputs) != 2:
+            raise ValueError("CSFblock requires exactly 2 input tensors.")
+        High, Low = inputs[0], inputs[1] 
+        #x1 = torch.Size([1, 256, 40, 40])
+        #x2 = torch.Size([1, 128, 40, 40])
+
+        N_High = self.DownChannels(High)
+        N_Low = self.UpChannels(Low)
+
+        key_H = self.AdaptiveAvgPool2d_1(N_High)
+        key_L = self.AdaptiveAvgPool2d_2(N_Low)
+
+
+        key_twice = torch.cat([key_H, key_L], 2)
+
+        softKey = self.softmax(key_twice)
+
+        doorH = torch.unsqueeze(softKey[:, :, 0], 2)
+        doorL = torch.unsqueeze(softKey[:, :, 1], 2)
+
+        good_high = doorH * N_High
+        good_low = doorL * N_Low
+
+        well_dool = good_high+ good_low
+
+        return well_dool
+
+
+

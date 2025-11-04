@@ -48,6 +48,7 @@ from models.common import (
     GhostBottleneck,
     GhostConv,
     Proto,
+    CSFblock,
 )
 from models.experimental import MixConv2d
 from utils.autoanchor import check_anchor_order
@@ -432,7 +433,10 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
-            c2 = sum(ch[x] for x in f)
+            c2 = sum(ch[x] for x in f)                              #当当前模块是 Concat 时，把要拼接的所有来源层（索引在 f 里）的输出通道数相加，得到本层的输出通道数 c2
+        elif m is CSFblock:
+            # args: [high_c, low_c, out_c]
+            c2 = args[2]  # 输出通道 = out_c
         # TODO: channel, gw, gd
         elif m in {Detect, Segment}:
             args.append([ch[x] for x in f])

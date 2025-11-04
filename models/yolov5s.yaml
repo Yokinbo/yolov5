@@ -2,8 +2,8 @@
 
 # Parameters
 nc: 80 # number of classes
-depth_multiple: 0.33 # model depth multiple  深度倍数
-width_multiple: 0.50 # layer channel multiple  通道倍数，一个层输出的通道数越多，表示这一层越宽。
+depth_multiple: 0.33 # model depth multiple  深度倍数    网络深度（网络层数）。作用在number上，乘以系数
+width_multiple: 0.50 # layer channel multiple  通道倍数，一个层输出的通道数越多，表示这一层越宽。  网络宽度（网络输出通道）。作用在args第一个参数上。
 anchors:
   - [10, 13, 16, 30, 33, 23] # P3/8            低层的anchor
   - [30, 61, 62, 45, 59, 119] # P4/16          中层的anchor
