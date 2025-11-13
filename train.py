@@ -568,7 +568,7 @@ def parse_opt(known=False):
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", type=str, default="/mnt/e/YOLO/yolov5/weight/yolov5m.pt", help="initial weights path")
-    parser.add_argument("--cfg", type=str, default="/mnt/e/YOLO/yolov5/models/yolov5m.yaml", help="model.yaml path")
+    parser.add_argument("--cfg", type=str, default="/mnt/e/YOLO/yolov5/models/yolov5m-bsyolo.yaml", help="model.yaml path")
     parser.add_argument("--data", type=str, default="/mnt/e/YOLO/yolov5/data/jsjdata.yaml", help="dataset.yaml path")
     parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")   #超参数文件的路径
     parser.add_argument("--epochs", type=int, default=100, help="total training epochs")

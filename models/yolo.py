@@ -24,7 +24,8 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 if platform.system() != "Windows":
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
-
+from models.AMimpro.amyolo_bifpn import BiFPN_Concat2,BiFPN_Concat3,E_SPPF,C3_Faster
+from models.AMimpro.bsyolo import SimAMC3
 from models.common import (
     C3,
     C3SPP,
@@ -409,12 +410,15 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
             GhostBottleneck,
             SPP,
             SPPF,
+            E_SPPF,
             DWConv,
             MixConv2d,
             Focus,
             CrossConv,
             BottleneckCSP,
             C3,
+            SimAMC3,
+            C3_Faster,
             C3TR,
             C3SPP,
             C3Ghost,
@@ -438,6 +442,14 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
             # args: [high_c, low_c, out_c]
             c2 = args[2]  # 输出通道 = out_c
         # TODO: channel, gw, gd
+
+                # 添加bifpn_concat结构
+        elif m is BiFPN_Concat2:
+            c2 = sum(ch[x] for x in f)
+        # 添加bifpn_concat结构
+        elif m is BiFPN_Concat3:
+            c2 = sum(ch[x] for x in f)
+
         elif m in {Detect, Segment}:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
