@@ -567,15 +567,9 @@ def parse_opt(known=False):
         - Tutorial: https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
     """
     parser = argparse.ArgumentParser()
-<<<<<<< HEAD
     parser.add_argument("--weights", type=str, default="/mnt/e/YOLO/yolov5/weight/yolov5m.pt", help="initial weights path")
-    parser.add_argument("--cfg", type=str, default="/mnt/e/YOLO/yolov5/models/yolov5m-bsyolo.yaml", help="model.yaml path")
+    parser.add_argument("--cfg", type=str, default="/mnt/e/YOLO/yolov5/models/yolov5m-CSFbifESPPF.yaml", help="model.yaml path")
     parser.add_argument("--data", type=str, default="/mnt/e/YOLO/yolov5/data/jsjdata.yaml", help="dataset.yaml path")
-=======
-    parser.add_argument("--weights", type=str, default="E:\YOLO\yolov5\weight\yolov5m.pt", help="initial weights path")
-    parser.add_argument("--cfg", type=str, default="E:\YOLO\yolov5\models\yolov5m.yaml", help="model.yaml path")
-    parser.add_argument("--data", type=str, default="E:\YOLO\yolov5\data\jsj.yaml", help="dataset.yaml path")
->>>>>>> c8aa9368dd687659a1267c730e5109d0d71938b3
     parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")   #超参数文件的路径
     parser.add_argument("--epochs", type=int, default=230, help="total training epochs")
     parser.add_argument("--batch-size", type=int, default=16, help="total batch size for all GPUs, -1 for autobatch")

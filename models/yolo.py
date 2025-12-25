@@ -24,8 +24,8 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 if platform.system() != "Windows":
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
-from models.AMimpro.amyolo_bifpn import BiFPN_Concat2,BiFPN_Concat3,E_SPPF,C3_Faster
-from models.AMimpro.bsyolo import SimAMC3
+from models.AMimpro.amyolo_bifpn import E_SPPF,C3_Faster
+from models.AMimpro.bsyolo import GSConv,VoVGSCSP, VoVGSCSPC,SimAMC3,BiFPN_Concat2,BiFPN_Concat3
 from models.common import (
     C3,
     C3SPP,
@@ -425,6 +425,8 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
             nn.ConvTranspose2d,
             DWConvTranspose2d,
             C3x,
+            GSConv,
+            VoVGSCSP,
         }:
             c1, c2 = ch[f], args[0]                                  #第一层，ch是一个只有3一个值的列表，[-1]是取列表中的最后一个元素，因为列表中只有3，所以是3
             if c2 != no:  # if not output
