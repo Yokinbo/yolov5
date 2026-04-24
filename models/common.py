@@ -78,6 +78,8 @@ class Conv(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         """Initializes a standard convolution layer with optional batch normalization and activation."""
         super().__init__()
+        # YOLOv5 里最常见的基础块，很多资料会把它记成 CBS:
+        # Conv2d + BatchNorm2d + SiLU(旧资料也常写成 Swish)。
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
@@ -170,8 +172,10 @@ class Bottleneck(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
+        # 先用 1x1 卷积压缩/整理通道，再用 3x3 卷积提取空间特征。
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
+        # shortcut=True 且输入输出通道一致时，走残差连接: out = x + F(x)。
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
@@ -237,6 +241,9 @@ class C3(nn.Module):
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
+        # C3 是 YOLOv5 Backbone/Neck 里的核心模块，可看成 CSP 思想的一个实现:
+        # 一支进入若干个 Bottleneck 做深层特征提取，另一支保留一部分原始信息，
+        # 最后 concat 再做一次卷积融合。
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c1, c_, 1, 1)
         self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
@@ -244,6 +251,9 @@ class C3(nn.Module):
 
     def forward(self, x):
         """Performs forward propagation using concatenated outputs from two convolutions and a Bottleneck sequence."""
+        # 主分支: cv1 -> Bottleneck x n
+        # 旁路分支: cv2
+        # 两支在通道维拼接后，再由 cv3 做融合输出。
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
 
 
@@ -326,6 +336,8 @@ class SPPF(nn.Module):
         """
         super().__init__()
         c_ = c1 // 2  # hidden channels
+        # SPPF 位于 Backbone 末端，用连续 3 次池化近似 SPP 的多尺度感受野，
+        # 让最深层特征在进入 Neck 之前先聚合更大范围的上下文信息。
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * 4, c2, 1, 1)
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
@@ -335,6 +347,7 @@ class SPPF(nn.Module):
         x = self.cv1(x)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # suppress torch 1.9.0 max_pool2d() warning
+            # x, y1, y2, y3 分别对应不同感受野的特征，再在通道维拼接。
             y1 = self.m(x)
             y2 = self.m(y1)
             return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))
@@ -453,6 +466,8 @@ class Concat(nn.Module):
         """Concatenates a list of tensors along a specified dimension; `x` is a list of tensors, `dimension` is an
         int.
         """
+        # Neck 里最常见的特征融合方式:
+        # 把不同层(例如上采样后的高语义特征 + Backbone 的浅层细节特征)在通道维拼接。
         return torch.cat(x, self.d)
 
 

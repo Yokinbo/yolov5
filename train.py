@@ -1,7 +1,8 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """
 Train a YOLOv5 model on a custom dataset. Models and datasets download automatically from the latest YOLOv5 release.
-
+模型解析函数在models/yolo.py (line 393)
+模型零件在models/common.py
 Usage - Single-GPU training:
     $ python train.py --data coco128.yaml --weights yolov5s.pt --img 640  # from pretrained (recommended)
     $ python train.py --data coco128.yaml --weights '' --cfg yolov5s.yaml --img 640  # from scratch
@@ -568,12 +569,12 @@ def parse_opt(known=False):
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", type=str, default="/mnt/e/YOLO/yolov5/weight/yolov5m.pt", help="initial weights path")
-    parser.add_argument("--cfg", type=str, default="/mnt/e/YOLO/yolov5/models/yolov5m-CSFbifESPPF.yaml", help="model.yaml path")
-    parser.add_argument("--data", type=str, default="/mnt/e/YOLO/yolov5/data/jsjdata.yaml", help="dataset.yaml path")
+    parser.add_argument("--cfg", type=str, default="/mnt/e/YOLO/yolov5/models/yolov5m.yaml", help="model.yaml path")
+    parser.add_argument("--data", type=str, default="/mnt/e/YOLO/yolov5/data/fengdiantest.yaml", help="dataset.yaml path")
     parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")   #超参数文件的路径
-    parser.add_argument("--epochs", type=int, default=230, help="total training epochs")
-    parser.add_argument("--batch-size", type=int, default=16, help="total batch size for all GPUs, -1 for autobatch")
-    parser.add_argument("--imgsz", "--img", "--img-size", type=int, default=640, help="train, val image size (pixels)")
+    parser.add_argument("--epochs", type=int, default=100, help="total training epochs")
+    parser.add_argument("--batch-size", type=int, default=8, help="total batch size for all GPUs, -1 for autobatch")
+    parser.add_argument("--imgsz", "--img", "--img-size", type=int, default=1024, help="train, val image size (pixels)")
     parser.add_argument("--rect", action="store_true", help="rectangular training")
     parser.add_argument("--resume", nargs="?", const=True, default=False, help="resume most recent training")
     parser.add_argument("--nosave", action="store_true", help="only save final checkpoint")

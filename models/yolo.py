@@ -88,6 +88,8 @@ class Detect(nn.Module):
         self.grid = [torch.empty(0) for _ in range(self.nl)]  # init grid
         self.anchor_grid = [torch.empty(0) for _ in range(self.nl)]  # init anchor grid
         self.register_buffer("anchors", torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
+        # 对每个检测层各放一个 1x1 Conv，把输入特征图通道数变成 na * (nc + 5)。
+        # 其中 5 表示: x, y, w, h, obj。
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
         self.inplace = inplace  # use inplace ops (e.g. slice assignment)
 
@@ -95,8 +97,10 @@ class Detect(nn.Module):
         """Processes input through YOLOv5 layers, altering shape for detection: `x(bs, 3, ny, nx, 85)`."""
         z = []  # inference output
         for i in range(self.nl):
+            # x[i] 分别对应 P3/P4/P5 三个尺度的特征图。
             x[i] = self.m[i](x[i])  # conv
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+            # 变形后更容易按 "每个网格、每个 anchor" 去解析预测结果。
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
             if not self.training:  # inference
@@ -110,7 +114,9 @@ class Detect(nn.Module):
                     y = torch.cat((xy, wh, conf.sigmoid(), mask), 4)
                 else:  # Detect (boxes only)
                     xy, wh, conf = x[i].sigmoid().split((2, 2, self.nc + 1), 4)
+                    # xy: 预测中心点，映射回当前特征图网格坐标，再乘 stride 回到原图尺度
                     xy = (xy * 2 + self.grid[i]) * self.stride[i]  # xy
+                    # wh: 预测框宽高，结合 anchor 还原到原图尺度
                     wh = (wh * 2) ** 2 * self.anchor_grid[i]  # wh
                     y = torch.cat((xy, wh, conf), 4)
                 z.append(y.view(bs, self.na * nx * ny, self.no))
@@ -165,10 +171,15 @@ class BaseModel(nn.Module):
         y, dt = [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
+                # m.f 表示当前层从哪里取输入:
+                # -1 表示接上一层输出
+                # 整数表示接某一层的输出
+                # 列表表示需要取多个层的输出(通常给 Concat/Detect 使用)
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
             x = m(x)  # run
+            # 只有后面会复用到的层才会缓存到 y 里，这就是 yaml 里 from/Concat 能连起来的原因。
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -240,6 +251,7 @@ class DetectionModel(BaseModel):
         if anchors:
             LOGGER.info(f"Overriding model.yaml anchors with anchors={anchors}")
             self.yaml["anchors"] = round(anchors)  # override yaml value
+        # 这里会把 yaml 里的 backbone/head 描述真正变成 PyTorch 的 nn.Sequential 网络。
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
         self.names = [str(i) for i in range(self.yaml["nc"])]  # default names
         self.inplace = self.yaml.get("inplace", True)
@@ -254,6 +266,8 @@ class DetectionModel(BaseModel):
 
             s = 256  # 2x min stride
             m.inplace = self.inplace
+            # 用一张假的输入图跑一次前向，反推出 Detect 各层对应的 stride:
+            # P3 通常是 8，P4 通常是 16，P5 通常是 32。
             m.stride = torch.tensor([s / x.shape[-2] for x in _forward(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
@@ -396,6 +410,9 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)  no表示模型的最终的输出通道数（如coco128数据集的80个类，则输出通道数为255）  5=w+h+x+y+c
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out      c1为输入通道数，c2为输出通道数
+    # 这里是整个模型“按图施工”的关键:
+    # 依次读取 yaml 里的每一层定义 [from, number, module, args]，
+    # 然后把它翻译成真正的 PyTorch 模块，并记录层与层之间的连接关系。
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # 例from：-1, number：1, module：‘Conv’, args：[64, 6, 2, 2]
         m = eval(m) if isinstance(m, str) else m  # eval strings       通过eval函数解析，将字符串转为对应的类
         for j, a in enumerate(args):
@@ -403,6 +420,7 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain    求n的实际值
+        # 下面这一大段 if/elif，本质上是在“推导当前层的输入/输出通道数，并整理构造参数”。
         if m in {
             Conv,
             GhostConv,
@@ -430,10 +448,14 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
         }:
             c1, c2 = ch[f], args[0]                                  #第一层，ch是一个只有3一个值的列表，[-1]是取列表中的最后一个元素，因为列表中只有3，所以是3
             if c2 != no:  # if not output
+                # 普通卷积层/模块的输出通道会按 width_multiple 做缩放；
+                # 但 Detect 输出层的通道数必须固定为 no，不能随便缩放。
                 c2 = make_divisible(c2 * gw, ch_mul)
 
             args = [c1, c2, *args[1:]]
             if m in {BottleneckCSP, C3, C3TR, C3Ghost, C3x}:
+                # 这类模块内部本身就带重复堆叠，因此把 n 写进模块参数里，
+                # 外层只实例化 1 次即可。
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
@@ -453,6 +475,7 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
             c2 = sum(ch[x] for x in f)
 
         elif m in {Detect, Segment}:
+            # Detect 最后要同时接收多个尺度特征图，所以这里把各输入层通道数收集起来传进去。
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
@@ -470,6 +493,7 @@ def parse_model(d, ch):                    ## model_dict:d表示yolov5s.yaml, in
         np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
         LOGGER.info(f"{i:>3}{str(f):>18}{n_:>3}{np:10.0f}  {t:<40}{str(args):<30}")  # print
+        # 记录后续还会被别的层拿来用的中间结果，例如 Neck 里的 Concat 和最后的 Detect。
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
